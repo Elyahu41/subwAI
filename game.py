@@ -1,3 +1,4 @@
+import keras
 import mss
 import mss.tools
 import subprocess
@@ -13,31 +14,24 @@ import tensorflow as tf
 from PIL import Image
 import random
 
-PATH_TO_GAME = 'C:\\Program Files\\WindowsApps\\' \
-               '16925JeuxjeuxjeuxGames.SubwaySurfersOriginalFree_1.0.0.0_x64__66k318ytnjhfe\\app\\app.exe'
-
-GAME = {"top": 150, "left": 570, "width": 750, "height": 750}
-PAUSE = {"top": 10, "left": 15, "width": 60, "height": 60}
-PATH_TO_IMAGES = 'images\\training'
+from config import PATH_TO_IMAGES, VIDEO_PATH, GAME, PAUSE
 
 frame_width = 750
 frame_height = 750
 frame_rate = 12.0
-VIDEO_PATH = "C:\\Users\\nikla\\PycharmProjects\\subwAI\\recordings\\"
-fourcc = cv2.VideoWriter_fourcc(*'XVID')
+fourcc = cv2.VideoWriter.fourcc(*'mp4v')
 
 
 class Game:
     def __init__(self):
         print("Starting the Game Subway Surfers!")
-        subprocess.run(PATH_TO_GAME)
 
         self.game_active = False
         self.all_zeros = False
         self.game_counter = 0
         self.key_pressed_counter = 0
 
-        self.out_name = None  # VIDEO_PATH+time.strftime("%Y%m%d-%H%M%S")+'.avi'
+        self.out_name = None  # VIDEO_PATH+time.strftime("%Y%m%d-%H%M%S")+'.mp4'
         self.out = None  # cv2.VideoWriter(self.out_name, fourcc, frame_rate, (frame_width, frame_height))
         self.last_time = time.time()
         self.game_start = time.time()
@@ -57,46 +51,37 @@ class Game:
         self.NN = None
 
         self.im_counter = dict()
-        self.im_counter['left'] = len([name for name in os.listdir(os.path.join(PATH_TO_IMAGES, 'left'))
-                                       if os.path.isfile(os.path.join(PATH_TO_IMAGES, 'left', name))])
-        self.im_counter['right'] = len([name for name in os.listdir(os.path.join(PATH_TO_IMAGES, 'right'))
-                                        if os.path.isfile(os.path.join(PATH_TO_IMAGES, 'right', name))])
-        self.im_counter['up'] = len([name for name in os.listdir(os.path.join(PATH_TO_IMAGES, 'up'))
-                                    if os.path.isfile(os.path.join(PATH_TO_IMAGES, 'up', name))])
-        self.im_counter['down'] = len([name for name in os.listdir(os.path.join(PATH_TO_IMAGES, 'down'))
-                                       if os.path.isfile(os.path.join(PATH_TO_IMAGES, 'down', name))])
-        self.im_counter['noop'] = len([name for name in os.listdir(os.path.join(PATH_TO_IMAGES, 'noop'))
-                                       if os.path.isfile(os.path.join(PATH_TO_IMAGES, 'noop', name))])
-        for field in self.im_counter:
-            print(self.im_counter[field])
+        # Ensure the base directory and action subfolders exist
+        for action in self.actions:
+            action_path = PATH_TO_IMAGES / action
+
+            # This creates the folder (and G:\subwAI\images\training) if missing
+            action_path.mkdir(parents=True, exist_ok=True)
+
+            # Now it's safe to count the files
+            self.im_counter[action] = len([
+                name for name in os.listdir(action_path)
+                if os.path.isfile(action_path / name)
+            ])
+
+            print(f"{action}: {self.im_counter[action]} images")
         self.frame_history = []
         time.sleep(5)
-
-    def disable_wifi(self):
-        """
-        Disable Wifi before playing to avoid ads.
-        """
-        if input("Please disable WIFI and enter 'y': ") == 'y':
-            print("WIFI disabled")
-        else:
-            print("WIFI not disabled?")
-            self.disable_wifi()
 
     def start_game(self):
         """
         For making the mouse-clicks necessary to start the game.
         """
-        # self.disable_wifi()
         self.game_active = True
-        pyautogui.moveTo(1, 1)
-        pyautogui.click(x=890, y=640)
+        #pyautogui.moveTo(1, 1)
+        #pyautogui.click(x=890, y=640)
         self.game_counter += 1
         print(f"starting game {self.game_counter}!")
-        time.sleep(4)
-        pyautogui.click(1134, 943)
+        #time.sleep(4)
+        #pyautogui.click(1134, 943)
         time.sleep(2)
-        pyautogui.click(970, 640)
-        self.out_name = VIDEO_PATH+time.strftime("%Y%m%d-%H%M%S")+'.avi'
+        #pyautogui.click(970, 640)
+        self.out_name = VIDEO_PATH+time.strftime("%Y%m%d-%H%M%S")+'.mp4'
         self.out = cv2.VideoWriter(self.out_name, fourcc, frame_rate, (frame_width, frame_height))
         self.game_start = time.time()
         self.intro = True
@@ -106,7 +91,7 @@ class Game:
         Called when game is over (when pause-button is not visible anymore). Makes necessary mouse-clicks
         to start next run.
         """
-        images = ['images/buttons/save_me4.png', 'images/buttons/play_button4.png', 'images/buttons/prizes.png']
+        images = ['images/buttons/save_me.png', 'images/buttons/play_button.png', 'images/buttons/prizes.png']
         while not self.game_active:
             click_location = None
             while not click_location:
@@ -119,19 +104,17 @@ class Game:
                         if i == 0:
                             c = 250
                             b = 0
-                        elif i == 2:
-                            b = 300
-                            c = 0
                         else:
                             b = 0
-                            c = 0
+                            c = -200
+                        print(f" clicking: {click_location}")
                         pyautogui.click(click_location_x-b, click_location_y-c)
                         if i == 1:
                             print("starting")
                             self.game_active = True
                             self.game_counter += 1
                             print(f"starting game {self.game_counter}!")
-                            self.out_name = VIDEO_PATH+time.strftime("%Y%m%d-%H%M%S")+'.avi'
+                            self.out_name = VIDEO_PATH+time.strftime("%Y%m%d-%H%M%S")+'.mp4'
                             self.out = cv2.VideoWriter(self.out_name, fourcc, frame_rate, (frame_width, frame_height))
                             self.game_start = time.time()
                             self.intro = True
@@ -151,9 +134,8 @@ class Game:
             os.remove(self.out_name)
             time.sleep(2)
             sys.exit("Terminating Program")
-        path = 'images/training'
 
-        with mss.mss() as sct:
+        with mss.MSS() as sct:
 
             img_game = sct.grab(GAME)
 
@@ -177,12 +159,11 @@ class Game:
                                 self.im_counter[field] += 1
                                 nr = self.im_counter[field]
                                 if key != 'noop':
-                                    self.last_saved = os.path.join(path, key, str(nr)+'.png')
+                                    self.last_saved = os.path.join(PATH_TO_IMAGES, key, str(nr)+'.png')
                                     self.last_key = key
                                 break
 
-                        mss.tools.to_png(self.frame_history[0].rgb, self.frame_history[0].size,
-                                         output=os.path.join(path, key, str(nr)+'.png'))
+                        mss.tools.to_png(self.frame_history[0].rgb, self.frame_history[0].size, output=os.path.join(PATH_TO_IMAGES, key, str(nr)+'.png'))
                         print(f"image saved in {key} folder")
 
         ret, thresh1 = cv2.threshold(cv2.cvtColor(np.array(img_pause),
@@ -214,28 +195,29 @@ class Game:
                 self.out.release()
                 last_time = time.time()
                 print("To keep recording enter 'y', else 'n'")
-                while True:
-                    if sys.argv[-1] == 'auto':
-                        print(self.last_time-self.game_start)
-                        if self.last_time-self.game_start > 60:
-                            print("Recording saved")
-                            break
-                        else:
-                            os.remove(self.out_name)
-                            print("Recording not saved")
-                            break
-                    else:
-                        if keyboard.is_pressed('y'):
-                            print("Recording saved")
-                            break
-                        elif keyboard.is_pressed('n'):
-                            os.remove(self.out_name)
-                            print("Recording not saved")
-                            break
-                        if (time.time() - last_time) > 5:
-                            print("Recording saved")
-                            break
-                return
+                sys.exit(0)
+                # while True:
+                #     if sys.argv[-1] == 'auto':
+                #         print(self.last_time-self.game_start)
+                #         if self.last_time-self.game_start > 60:
+                #             print("Recording saved")
+                #             break
+                #         else:
+                #             os.remove(self.out_name)
+                #             print("Recording not saved")
+                #             break
+                #     else:
+                #         if keyboard.is_pressed('y'):
+                #             print("Recording saved")
+                #             break
+                #         elif keyboard.is_pressed('n'):
+                #             os.remove(self.out_name)
+                #             print("Recording not saved")
+                #             break
+                #         if (time.time() - last_time) > 5:
+                #             print("Recording saved")
+                #             break
+                # return
 
         cv2.putText(frame, "FPS: %f" % (1.0 / (time.time() - self.last_time)),
                     (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
@@ -260,7 +242,7 @@ class Game:
         cap = img
         img = cv2.resize(img, (96, 96), interpolation=cv2.INTER_AREA)
         # cap = img
-        img = tf.keras.preprocessing.image.img_to_array(img)[:, :, :3]  # convert image to array
+        img = keras.preprocessing.image.img_to_array(img)[:, :, :3]  # convert image to array
 
         if self.NN:
             img = tf.expand_dims(img, 0)  # create a batch
@@ -274,14 +256,20 @@ class Game:
 
     def take_action(self, action):
         """
-        For executing the predicted action.
+        Executes the predicted action using pyautogui for better emulator compatibility.
         """
-        print(action)
         if action == 'noop':
             return
-        keyboard.press(action)
-        time.sleep(0.01)
-        keyboard.release(action)
+
+        print(f"Executing action: {action}")
+
+        try:
+            # We use press() which combines keyDown and keyUp
+            # Increasing _pause ensures the game engine registers the event
+            pyautogui.press(action, _pause=0.001)
+
+        except Exception as e:
+            print(f"Failed to press {action}: {e}")
 
     def listen(self):
         """

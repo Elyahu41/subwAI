@@ -1,29 +1,35 @@
-from game import Game
 import os
-import time
-import cv2
-import numpy as np
 import sys
-from joblib import dump, load
-import visualkeras
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.linear_model import LogisticRegression, Perceptron
-from sklearn.naive_bayes import GaussianNB
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.model_selection import train_test_split
-import tensorflow as tf
+import time
 
-EPOCHS = 20
+import cv2
+import keras
+import numpy as np
+import tensorflow as tf
+import visualkeras
+from joblib import dump, load
+from keras import utils
+from sklearn.model_selection import train_test_split
+
+from config import PRELOAD_DIR, PATH_TO_IMAGES2, NUM_CATEGORIES
+from game import Game
+
+# 1.) change config.py directories to where you would like to save the data
+# 2.) run py ai.py gather to generate data
+# 3.) copy the files to training2 folder and then run py dataset_augmentation.py (run  py image_check.py if you want to double check the data)
+# 4.) run py ai.py train
+# 5.) run py ai.py play
+
 if len(sys.argv) > 3:
     IMG_WIDTH = int(sys.argv[-1])
     IMG_HEIGHT = int(sys.argv[-1])
 else:
     IMG_WIDTH = 96
     IMG_HEIGHT = 96
-NUM_CATEGORIES = 5
-TEST_SIZE = 0.3
 
-PATH_TO_IMAGES = 'images\\training'
+TEST_SIZE = 0.3
+EPOCHS = 20
+
 ACTIONS2IDX = {
     'left': 0,
     'right': 1,
@@ -58,19 +64,30 @@ def train_on_data():
     """
     pixels, images, labels = load_data()
 
-    labels = tf.keras.utils.to_categorical(labels)
+    labels = utils.to_categorical(labels)
     # Split data into training and testing sets
     labels_nr = np.argmax(labels, axis=1).reshape((labels.shape[0], ))
 
     # models = [KNeighborsClassifier(n_neighbors=5), GaussianNB(), Perceptron(), tf.keras.models.Sequential()]
-    models = [tf.keras.models.Sequential()]
+    models = [keras.Sequential()]
     accuracies = []
+    os.makedirs(os.path.join('models', 'Sequential'), exist_ok=True)
     for classifier in models:
-        filename = os.path.join('models', type(classifier).__name__)
+        filename = os.path.join('models', type(classifier).__name__ + ".keras")
         if type(classifier).__name__ == 'Sequential':
             # Get a compiled neural network
             model = get_model()
-            visualkeras.layered_view(model, to_file=os.path.join('models', 'Sequential', 'architecture.png')).show()
+            # 1. Force the model to initialize by passing a dummy tensor
+            # This is more reliable than model.build() in Keras 3
+            dummy_input = tf.ones((1, IMG_HEIGHT, IMG_WIDTH, 3))
+            model(dummy_input)
+            # 2. Try visualkeras with a manual check
+            try:
+                visualkeras.layered_view(model, to_file=os.path.join('models', 'Sequential', 'architecture.png')).show()
+            except Exception as e:
+                print(f"Visualkeras failed to draw: {e}")
+                # Fallback to the built-in Keras plotter if visualkeras is incompatible
+                # utils.plot_model(model, to_file=os.path.join('models', 'Sequential', 'architecture.png'), show_shapes=True)
 
             # Split data into training and testing sets
             x_train, x_test, y_train, y_test = train_test_split(np.array(images), np.array(labels), test_size=TEST_SIZE)
@@ -92,7 +109,7 @@ def train_on_data():
             print(model.summary())
 
             # log to text file
-            with open(os.path.join('models', 'report.txt'), 'a') as fh:
+            with open(os.path.join('models', 'report.txt'), 'a', encoding='utf-8') as fh:
                 # Pass the file handle in as a lambda function to make it callable
                 model.summary(line_length=100, print_fn=lambda x: fh.write(x + '\n'))
                 fh.write('Epochs: ' + str(EPOCHS) + '\n')
@@ -105,7 +122,7 @@ def train_on_data():
                         break
                 fh.write('\n')
             model_path = os.path.join('models', 'Sequential', 'model_'+str(round(metrics[1], 2)*100)+'.png')
-            tf.keras.utils.plot_model(model, to_file=model_path, show_shapes=True, show_layer_names=True)
+            # utils.plot_model(model, to_file=model_path, show_shapes=True, show_layer_names=True)
 
         else:
             model = classifier
@@ -123,8 +140,8 @@ def train_on_data():
             print(f"Model saved to {filename}.")
 
         # Compute how well we performed
-        correct = (y_test == predictions).sum()
-        incorrect = (y_test != predictions).sum()
+        correct = np.sum(y_test == predictions)
+        incorrect = np.sum(y_test != predictions)
         total = len(predictions)
 
         # Print results
@@ -143,7 +160,6 @@ def gather_training_data():
     Starts playing loop and saves individual frames into respective folders depending on actions taken.
     """
     game = Game()
-    game.disable_wifi()
     game.start_game()
     frame = None
     counter = 0
@@ -165,14 +181,18 @@ def let_ai_play():
     Loads saved model and starts playing loop with model making predictions for individual frames.
     """
     game = Game()
-    game.disable_wifi()
-    # [KNeighborsClassifier(n_neighbors=5), tf.keras.models.Sequential(), GaussianNB(), Perceptron()]
-    model = tf.keras.models.Sequential()
-    path = os.path.join('models', type(model).__name__+'_whole_set')
+    # We define the base model type to determine the path
+    model_type = 'Sequential'
 
-    if type(model).__name__ == 'Sequential':
+    # Update the path to include the .keras extension
+    path = os.path.join('models', model_type + '.keras')
+
+    if model_type == 'Sequential':
         game.NN = True
-        game.model = tf.keras.models.load_model(path)
+        if not os.path.exists(path):
+            sys.exit(f"ERROR: Model file not found at {path}. Did you finish training?")
+
+        game.model = keras.models.load_model(path)
         print(game.model.summary())
     else:
         game.model = load(path + '.joblib')
@@ -248,9 +268,9 @@ def load_data():
     """
     if len(sys.argv) > 2:
         if sys.argv[2] == 'load':
-            images = np.load(os.path.join('dataset_preloaded', 'images'+str(IMG_WIDTH)+'.npy'))
-            labels = np.load(os.path.join('dataset_preloaded', 'labels'+str(IMG_WIDTH)+'.npy'))
-            pixels = np.load(os.path.join('dataset_preloaded', 'pixels'+str(IMG_WIDTH)+'.npy'))
+            images = np.load(os.path.join(PRELOAD_DIR, 'images'+str(IMG_WIDTH)+'.npy'))
+            labels = np.load(os.path.join(PRELOAD_DIR, 'labels'+str(IMG_WIDTH)+'.npy'))
+            pixels = np.load(os.path.join(PRELOAD_DIR, 'pixels'+str(IMG_WIDTH)+'.npy'))
 
             return pixels, images, labels
     else:
@@ -262,10 +282,10 @@ def load_data():
         folders = ['down', 'down_flipped', 'up', 'up_flipped', 'left', 'right_flipped',
                    'right', 'left_flipped', 'noop', 'noop_flipped']
         
-        min_images = len(os.listdir(os.path.join(PATH_TO_IMAGES, 'down')))*2
+        min_images = len(os.listdir(os.path.join(PATH_TO_IMAGES2, 'down')))*2
         
         for folder in folders:
-            folder_path = os.path.join(PATH_TO_IMAGES, str(folder))
+            folder_path = os.path.join(PATH_TO_IMAGES2, str(folder))
             
             counter = 0
             print(folder)
@@ -290,9 +310,9 @@ def load_data():
 
         pixels = x_data.flatten().reshape(int(len(images)), int(x_data.size/len(images)))
 
-        np.save(os.path.join('dataset_preloaded', 'images'+str(IMG_WIDTH)+'.npy'), np.array(images))
-        np.save(os.path.join('dataset_preloaded', 'labels'+str(IMG_WIDTH)+'.npy'), np.array(labels))
-        np.save(os.path.join('dataset_preloaded', 'pixels'+str(IMG_WIDTH)+'.npy'), np.array(pixels))
+        np.save(os.path.join(PRELOAD_DIR, 'images'+str(IMG_WIDTH)+'.npy'), np.array(images))
+        np.save(os.path.join(PRELOAD_DIR, 'labels'+str(IMG_WIDTH)+'.npy'), np.array(labels))
+        np.save(os.path.join(PRELOAD_DIR, 'pixels'+str(IMG_WIDTH)+'.npy'), np.array(pixels))
 
         return pixels, images, labels
 
@@ -306,7 +326,7 @@ def get_model():
     # TF IMPLEMENTATION
     # make sequential model
     # passing it as input a list of all the layers that we want to add instead of just adding them one after the other
-    model = tf.keras.models.Sequential([
+    model = keras.models.Sequential([
         # normalizing layer
         # tf.keras.layers.experimental.preprocessing.Rescaling(1./255, input_shape=(IMG_HEIGHT, IMG_WIDTH, 3)),
         # 1. Convolution step (Convolutional layer with e.g. 32 filters using a 3x3 kernel)
@@ -338,88 +358,32 @@ def get_model():
         # 1. first layer is conv layer
         # -> learn 32 diff filters with 3x3 kernels each
         # -> input shape is this case is dimensions of the images (in banknotes we had 4 different inputs)
-        tf.keras.layers.Conv2D(
+        keras.layers.Conv2D(
             32, (3, 3), activation="tanh", input_shape=(IMG_HEIGHT, IMG_WIDTH, 3)
         ),
 
         # 2. pooling layer
         # -> look at 3x3 regions of the image and extract max-value to reduce size of input
-        tf.keras.layers.AveragePooling2D(pool_size=(2, 2)),
+        keras.layers.AveragePooling2D(pool_size=(2, 2)),
 
         # additional step of convolution and pooling
-        tf.keras.layers.Conv2D(
+        keras.layers.Conv2D(
             16, (3, 3), activation="tanh"  # input_shape=(31, 31, 32)
         ),
-        tf.keras.layers.AveragePooling2D(pool_size=(2, 2)),
+        keras.layers.AveragePooling2D(pool_size=(2, 2)),
 
         # 3. Flatten units
-        tf.keras.layers.Flatten(),
+        keras.layers.Flatten(),
 
-        # 4. make traditional NN architecture
-        # -> densely connected hidden layer with 128 units
-        # -> a NN without hidden layers only makes sense for linearly separable datasets
-        # -> multiple layers allow us to get more complex functions
-        # (multiple decision boundaries (one learned by each node in hidden layer)
-        # that each account for some unique feature of the dataset)
-        # -> to prevent over-fitting adding dropout
-        # (randomly and temporarily leave out half of the nodes from this hidden layer)
-        # -> lastly add an output layer with output units for all 43 different roadsigns
-        # -> softmax takes output and turns it into a probability distribution
-        tf.keras.layers.Dense(128, activation="relu"),
-        # tf.keras.layers.Dense(128, activation="relu"),
-        tf.keras.layers.Dropout(0.3),
-        # tf.keras.layers.Dense(128, activation="relu"),
-        # tf.keras.layers.Dropout(0.3),
+        keras.layers.Dense(128, activation="relu"),
+        keras.layers.Dropout(0.3),
 
         # has to be softmax apparently
-        tf.keras.layers.Dense(NUM_CATEGORIES, activation="softmax")
+        keras.layers.Dense(NUM_CATEGORIES, activation="softmax")
     ])
 
-    # KERAS IMPLEMENTATION
-    # input_shape = (IMG_HEIGHT, IMG_WIDTH, 3)
-    # img_input = k.Input(shape=input_shape)
-    # conv1 = layers.Conv2D(32, (3, 3), activation='sigmoid', input_shape=input_shape)(img_input)
-    # pool1 = layers.AveragePooling2D(pool_size=(3, 3))(conv1)
-    # conv2 = layers.Conv2D(16, (2, 2), activation='sigmoid')(pool1)
-    # pool2 = layers.AveragePooling2D(pool_size=(2, 2))(conv2)
-    # flat1 = layers.Flatten()(pool2)
-    # dense1 = layers.Dense(128, activation='relu')(flat1)
-    # dense2 = layers.Dense(NUM_CATEGORIES, activation='softmax')(dense1)
-    #
-    # model = models.Model(img_input, dense2)
-
-    # accuracy shows how many guesses of the training dataset were correct
-    # accuracy hopefully improving by repeating the process of gradient descent
-    # GRADIENT DESCENT:
-    # (stochastic (not all datapoints but randomly one each time) / mini-batch (small random sample each time))
-    # Start with a random choice of weights.
-    # This is our naive starting place, where we don’t know how much we should weight each input.
-    # Repeat:
-    # Calculate the gradient based on all data points that will lead to decreasing loss.
-    # Ultimately, the gradient is a vector (a sequence of numbers).
-    # Update weights according to the gradient.
-    # (algorithm for minimizing loss to more accurately predict output)
-    # (loss tells how bad hypothesis fct happens to be)
-    # (telling in which direction we should be moving weights in order to minimize loss)
-    # (learning not only weights but also the features/kernels to use)
-    # BACKPROPAGATION:
-    # Calculate error for output layer
-    # For each layer, starting with output layer and moving inwards towards earliest hidden layer:
-    # Propagate error back one layer. In other words, the current layer that’s being considered
-    # sends the errors to the preceding layer.
-    # Update weights.
-    # (By knowing the error/loss of the output we can track backwards,
-    # what nodes/weights and how much they were responsible for the error/loss
-    # in order to know how to update weights)
-    # (--> this is what makes NNs possible)
-    # (taking multilevel structures and training them depending on
-    # what values of weights are in order to figure out how to update weights to arrive at fct that minimizes loss best)
-
-    # last output is from testing set
-
-    # Train neural network
     model.compile(
-        optimizer="adam",
+        optimizer=keras.optimizers.Adam(learning_rate=0.001),
         loss="categorical_crossentropy",
         metrics=["accuracy"]
     )
